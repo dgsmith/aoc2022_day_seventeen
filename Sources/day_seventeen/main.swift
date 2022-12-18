@@ -238,8 +238,33 @@ struct Chamber: CustomStringConvertible {
         return "\n" + tabs + "|0123456|\n" + string + "\t+-------+"
     }
     
-    private mutating func move(shape: Shape, by: (x: Int, y: Int)) {
+    var heightMap: [Int] {
+        var map = [0, 0, 0, 0, 0, 0, 0]
+        if tallestY == -1 {
+            return map
+        }
         
+        let relativeY = tallestY
+        for x in 0..<7 {
+            var index = relativeY
+            while true {
+                let offset = relativeY - index
+                if index < 0 {
+                    map[x] = offset
+                    break
+                }
+                
+                let currentParticle = tower[index][x]
+                if currentParticle.kind == .rock {
+                    map[x] = offset
+                    break
+                }
+                
+                index -= 1
+            }
+        }
+        
+        return map
     }
     
     mutating func insert(shape: Shape) {
@@ -499,26 +524,54 @@ struct Chamber: CustomStringConvertible {
     }
 }
 
+struct Key: Hashable {
+    let heightMap: [Int]
+    let movementIndex: Int
+    let shapeIndex: Int
+}
+
 var chamber = Chamber()
 
 let shapeOrder: [Shape.Kind] = [.line, .plus, .reverseL, .i, .block]
 
+var cache = [Key: [(shapesDropped: Int, currentHeight: Int)]]()
+
 var shapesFallen = 0
 var index = 0
-while shapesFallen < 2023 {
-    if chamber.currentlyFallingShape == nil {
-        let newShape = Shape.of(kind: shapeOrder[shapesFallen % shapeOrder.count])
-        chamber.insert(shape: newShape)
-    }
 
-    let movement = movements[index % movements.count]
-//    print()
-//    print(movement)
+var heights = [Int]()
+heights.append(0)
+
+let TOTAL_SHAPES = 1000000000000
+
+// create a cache with key: heightmap, wind index, current shape
+// and store the number of shapes dropped so far
+
+// once find a cycle, basically want to repeat it up to the number of shapes
+// we care about the final height
+
+while shapesFallen <= 5000 {
+    let shapeIndex = shapesFallen % shapeOrder.count
+    let movementIndex = index % movements.count
+    if chamber.currentlyFallingShape == nil {
+        let newShape = Shape.of(kind: shapeOrder[shapeIndex])
+        chamber.insert(shape: newShape)
+        
+        // new cache entry for new shape
+        let key = Key(heightMap: chamber.heightMap, movementIndex: movementIndex, shapeIndex: shapeIndex)
+        let value = (shapesDropped: shapesFallen, currentHeight: chamber.tallestY - 1)
+        if cache[key] != nil {
+            cache[key]!.append(value)
+        } else {
+            cache[key] = [value]
+        }
+        heights.append(chamber.tallestY - 1)
+    }
+    
+    let movement = movements[movementIndex]
     chamber.process(wind: movement)
     index += 1
     
-//    print(chamber)
-
     chamber.processGravity()
 
     if chamber.currentlyFallingShape == nil {
@@ -528,7 +581,40 @@ while shapesFallen < 2023 {
 //    print(chamber)
 }
 
-print(chamber)
+//print(chamber)
 print(movements.count)
-print(index)
+//print(index)
 print(chamber.tallestY - 1) // index 0 to 1
+
+print(cache.keys.count)
+
+var loop: [(shapesDropped: Int, currentHeight: Int)]?
+for elem in cache {
+    if elem.value.count > 1 {
+        print("found loop!")
+//        print(elem)
+        loop = elem.value
+        break
+    }
+}
+
+guard let loop else {
+    fatalError()
+}
+
+print(loop)
+let loopShapeCountDelta = loop[1].shapesDropped - loop[0].shapesDropped
+let loopHeightDelta = loop[1].currentHeight - loop[0].currentHeight
+print("loopShapeCountDelta=\(loopShapeCountDelta), loopHeightDelta=\(loopHeightDelta)")
+
+let shapesToFillWithLoop = TOTAL_SHAPES - loop[0].shapesDropped
+let loopsThatFit = shapesToFillWithLoop / loopShapeCountDelta
+let overflowShapes = shapesToFillWithLoop % loopShapeCountDelta
+print("shapesToFillWithLoop=\(shapesToFillWithLoop), loopsThatFit=\(loopsThatFit), overflowShapes=\(overflowShapes)")
+
+print(heights[loop[0].shapesDropped + 1])
+let overflowHeight = heights[loop[1].shapesDropped + overflowShapes + 1] - heights[loop[1].shapesDropped + 1]
+print("overflowHeight=\(overflowHeight)")
+
+let totalHeight = loop[0].currentHeight + (loopsThatFit * loopHeightDelta) + overflowHeight
+print("totalHeight=\(totalHeight)")
